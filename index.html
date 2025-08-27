@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>قائمة المشتريات</title>
+    <title>قائمة المشتريات المشتركة</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+
     <style>
         :root {
             --primary-color: #2a9d8f;
@@ -44,7 +48,7 @@
 
         .input-area {
             display: flex;
-            flex-wrap: wrap; /* Allows wrapping for smaller screens */
+            flex-wrap: wrap;
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -74,7 +78,7 @@
         }
 
         #add-btn {
-            width: 100%; /* Full width on smaller screens */
+            width: 100%;
             padding: 12px 20px;
             font-size: 16px;
             font-weight: bold;
@@ -94,7 +98,7 @@
             display: flex;
             justify-content: space-between;
             gap: 10px;
-            margin-bottom: 10px; /* Adjusted margin */
+            margin-bottom: 10px;
         }
 
         .control-btn {
@@ -263,7 +267,7 @@
 <body>
 
     <div class="container">
-        <h1>قائمة المشتريات</h1>
+        <h1>قائمة المشتريات المشتركة</h1>
         <div class="input-area">
             <div class="input-group">
                 <textarea id="items-textarea" placeholder="مثال: رز، خبز، ٣ كيلو طماطم..."></textarea>
@@ -278,7 +282,7 @@
             <button id="add-btn">إضافة</button>
         </div>
         <div class="controls">
-            <button class="control-btn" id="copy-btn">📋 نسخ القائمة</button>
+            <button class="control-btn" id="share-btn">🔗 مشاركة القائمة</button>
             <button class="control-btn clear-btn" id="clear-btn">🗑️ مسح الكل</button>
         </div>
         
@@ -293,35 +297,46 @@
     <div id="toast" class="toast">تم نسخ القائمة!</div>
 
     <script>
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyAiOVxlpHPdMKVSHo-EA1gIWwM8FSdV6yg",
+            authDomain: "shoppinglistapp-2026.firebaseapp.com",
+            projectId: "shoppinglistapp-2026",
+            storageBucket: "shoppinglistapp-2026.firebasestorage.app",
+            messagingSenderId: "896399512326",
+            appId: "1:896399512326:web:cfc2197b7744fddf374487",
+            measurementId: "G-8SMDD9VRZW"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
         document.addEventListener('DOMContentLoaded', () => {
             const itemsTextarea = document.getElementById('items-textarea');
             const addBtn = document.getElementById('add-btn');
             const categorySelect = document.getElementById('category-select');
             const shoppingList = document.getElementById('shopping-list');
             const clearBtn = document.getElementById('clear-btn');
-            const copyBtn = document.getElementById('copy-btn');
+            const shareBtn = document.getElementById('share-btn');
             const toast = document.getElementById('toast');
             const progressContainer = document.getElementById('progress-container');
             const progressBarFill = document.getElementById('progress-bar-fill');
             const progressLabel = document.getElementById('progress-label');
 
-            let items = JSON.parse(localStorage.getItem('shoppingListItems')) || [];
+            let items = [];
+            let currentListId = null;
+            let unsubscribe = null; // To hold the listener detachment function
             let completionNotified = false;
 
             const categoryOrder = ["خضار", "لحوم", "منظفات", "خبز", "أخرى"];
 
-            // Data migration for old items
-            items.forEach(item => {
-                if (typeof item.quantity === 'undefined') {
-                    item.quantity = 1;
-                }
-                if (typeof item.category === 'undefined') {
-                    item.category = 'أخرى';
-                }
-            });
-
-            const saveItems = () => {
-                localStorage.setItem('shoppingListItems', JSON.stringify(items));
+            const showToast = (message) => {
+                toast.textContent = message;
+                toast.classList.add('show');
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 3000);
             };
 
             const updateProgress = () => {
@@ -335,7 +350,7 @@
                 progressContainer.style.display = 'block';
                 progressLabel.style.display = 'block';
 
-                const purchasedItems = items.filter(item => item.purchased).length;
+                const purchasedItems = items.filter(item => item.done).length;
                 const percentage = (purchasedItems / totalItems) * 100;
 
                 progressBarFill.style.width = `${percentage}%`;
@@ -373,7 +388,7 @@
                             groupedItems[category].forEach(item => {
                                 const li = document.createElement('li');
                                 li.className = 'list-item';
-                                if (item.purchased) {
+                                if (item.done) {
                                     li.classList.add('purchased');
                                 }
                                 li.dataset.index = item.originalIndex;
@@ -383,7 +398,7 @@
 
                                 const span = document.createElement('span');
                                 span.className = 'item-text';
-                                span.textContent = `${item.text} (×${item.quantity})`;
+                                span.textContent = `${item.name} (×${item.quantity})`;
                                 
                                 itemTextContainer.appendChild(span);
 
@@ -416,41 +431,114 @@
                 updateProgress();
             };
 
-            const addItemsFromTextarea = () => {
+            const listenToListChanges = (listId) => {
+                if (unsubscribe) {
+                    unsubscribe();
+                }
+                unsubscribe = db.collection('shoppingLists').doc(listId)
+                    .onSnapshot(doc => {
+                        if (doc.exists) {
+                            items = doc.data().items || [];
+                            renderItems();
+                        } else {
+                            console.error("List not found!");
+                            // Handle case where the list ID in the URL is invalid
+                            window.location.hash = ''; // Reset to create a new list
+                            handleRouting();
+                        }
+                    });
+            };
+
+            const createNewListInFirestore = async () => {
+                try {
+                    const newListRef = await db.collection('shoppingLists').add({
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        items: []
+                    });
+                    window.location.hash = `list/${newListRef.id}`;
+                } catch (error) {
+                    console.error("Error creating new list: ", error);
+                    alert("لا يمكن إنشاء قائمة جديدة. يرجى التحقق من اتصالك بالإنترنت أو إعدادات Firebase.");
+                }
+            };
+
+            const handleRouting = () => {
+                const hash = window.location.hash;
+                if (hash && hash.startsWith('#list/')) {
+                    currentListId = hash.substring(6);
+                    listenToListChanges(currentListId);
+                } else {
+                    createNewListInFirestore();
+                }
+            };
+
+            const addItems = async () => {
+                if (!currentListId) return;
                 const text = itemsTextarea.value.trim();
                 const category = categorySelect.value;
                 if (text === '') return;
 
                 const newItems = text.split(/[,،\n]+/).map(s => s.trim()).filter(s => s !== '');
-                
-                newItems.forEach(itemText => {
-                    const existingItem = items.find(i => i.text === itemText && i.category === category);
-                    if (existingItem) {
-                        existingItem.quantity++;
-                    } else {
-                        items.push({ text: itemText, purchased: false, quantity: 1, category: category });
+                const listRef = db.collection('shoppingLists').doc(currentListId);
+
+                try {
+                    await db.runTransaction(async (transaction) => {
+                        const doc = await transaction.get(listRef);
+                        if (!doc.exists) {
+                            throw "Document does not exist!";
+                        }
+                        const existingItems = doc.data().items || [];
+                        newItems.forEach(itemName => {
+                            const existingItem = existingItems.find(i => i.name === itemName && i.category === category);
+                            if (existingItem) {
+                                existingItem.quantity++;
+                            } else {
+                                existingItems.push({ name: itemName, done: false, quantity: 1, category: category });
+                            }
+                        });
+                        transaction.update(listRef, { items: existingItems });
+                    });
+                    itemsTextarea.value = '';
+                } catch (e) {
+                    console.error("Transaction failed: ", e);
+                }
+            };
+
+            const updateItem = async (index, updatedData) => {
+                if (!currentListId) return;
+                const listRef = db.collection('shoppingLists').doc(currentListId);
+                try {
+                    const doc = await listRef.get();
+                    if (doc.exists) {
+                        const currentItems = doc.data().items || [];
+                        Object.assign(currentItems[index], updatedData);
+                        await listRef.update({ items: currentItems });
                     }
-                });
-
-                completionNotified = false;
-                itemsTextarea.value = '';
-                saveItems();
-                renderItems();
-            };
-            
-            const showToast = (message) => {
-                toast.textContent = message;
-                toast.classList.add('show');
-                setTimeout(() => {
-                    toast.classList.remove('show');
-                }, 3000);
+                } catch (e) {
+                    console.error("Error updating item: ", e);
+                }
             };
 
-            addBtn.addEventListener('click', addItemsFromTextarea);
+            const deleteItem = async (index) => {
+                if (!currentListId) return;
+                const listRef = db.collection('shoppingLists').doc(currentListId);
+                try {
+                    const doc = await listRef.get();
+                    if (doc.exists) {
+                        const currentItems = doc.data().items || [];
+                        currentItems.splice(index, 1);
+                        await listRef.update({ items: currentItems });
+                    }
+                } catch (e) {
+                    console.error("Error deleting item: ", e);
+                }
+            };
+
+            addBtn.addEventListener('click', addItems);
             itemsTextarea.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    addItemsFromTextarea();
+                    addItems();
                 }
             });
 
@@ -462,69 +550,40 @@
                 const index = parseInt(li.dataset.index, 10);
 
                 if (target.classList.contains('delete-btn')) {
-                    items.splice(index, 1);
-                    completionNotified = false;
+                    deleteItem(index);
                 } else if (target.classList.contains('increase-btn')) {
-                    items[index].quantity++;
+                    updateItem(index, { quantity: items[index].quantity + 1 });
                 } else if (target.classList.contains('decrease-btn')) {
                     if (items[index].quantity > 1) {
-                        items[index].quantity--;
+                        updateItem(index, { quantity: items[index].quantity - 1 });
                     }
                 } else if (target.closest('.item-text-container')) {
-                    items[index].purchased = !items[index].purchased;
+                    updateItem(index, { done: !items[index].done });
                 }
-                
-                saveItems();
-                renderItems();
             });
 
-            clearBtn.addEventListener('click', () => {
+            clearBtn.addEventListener('click', async () => {
+                if (!currentListId) return;
                 if (confirm('هل أنت متأكد أنك تريد مسح القائمة بالكامل؟')) {
-                    items = [];
-                    completionNotified = false;
-                    saveItems();
-                    renderItems();
+                    try {
+                        await db.collection('shoppingLists').doc(currentListId).update({ items: [] });
+                    } catch (e) {
+                        console.error("Error clearing list: ", e);
+                    }
                 }
             });
             
-            copyBtn.addEventListener('click', () => {
-                if (items.length === 0) {
-                    showToast('القائمة فارغة للنسخ!');
-                    return;
-                }
-                
-                const groupedItems = items.reduce((acc, item) => {
-                    const category = item.category || 'أخرى';
-                    if (!acc[category]) {
-                        acc[category] = [];
-                    }
-                    acc[category].push(item);
-                    return acc;
-                }, {});
-
-                let listAsText = "";
-                categoryOrder.forEach(category => {
-                    if (groupedItems[category]) {
-                        listAsText += `
---- ${category} ---
-`;
-                        groupedItems[category].forEach(item => {
-                            listAsText += `${item.purchased ? '[x]' : '[ ]'} ${item.text} (الكمية: ${item.quantity})
-`;
-                        });
-                    }
-                });
-
-                navigator.clipboard.writeText(listAsText.trim()).then(() => {
-                    showToast('تم نسخ القائمة بنجاح!');
+            shareBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(window.location.href).then(() => {
+                    showToast('تم نسخ رابط القائمة للمشاركة!');
                 }).catch(err => {
-                    showToast('فشل النسخ!');
-                    console.error('Failed to copy: ', err);
+                    showToast('فشل نسخ الرابط!');
                 });
             });
 
-            saveItems(); // Save once on load to migrate old data
-            renderItems();
+            // Initial setup
+            handleRouting();
+            window.addEventListener('hashchange', handleRouting);
         });
     </script>
 </body>
