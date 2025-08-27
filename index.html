@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>قائمة المشتريات</title>
+    <style>
+        :root {
+            --primary-color: #2a9d8f;
+            --secondary-color: #e9c46a;
+            --background-color: #f8f9fa;
+            --text-color: #343a40;
+            --light-gray: #e9ecef;
+            --white: #ffffff;
+            --danger-color: #e76f51;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--white);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 20px;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        #items-textarea {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid var(--light-gray);
+            border-radius: 8px;
+            font-size: 16px;
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        #add-btn {
+            padding: 0 20px;
+            font-size: 16px;
+            font-weight: bold;
+            background-color: var(--primary-color);
+            color: var(--white);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        #add-btn:hover {
+            background-color: #248a7e;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .control-btn {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid var(--light-gray);
+            background-color: var(--white);
+            color: var(--text-color);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        
+        .control-btn.clear-btn {
+            border-color: var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .control-btn:hover {
+            background-color: var(--light-gray);
+        }
+        
+        .control-btn.clear-btn:hover {
+            background-color: var(--danger-color);
+            color: var(--white);
+        }
+
+        #shopping-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .list-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            background: var(--white);
+            border-bottom: 1px solid var(--light-gray);
+            transition: background-color 0.3s;
+            cursor: pointer;
+        }
+
+        .list-item:last-child {
+            border-bottom: none;
+        }
+
+        .list-item.purchased .item-text {
+            text-decoration: line-through;
+            color: #adb5bd;
+        }
+        
+        .list-item.purchased {
+            background-color: #f1f3f5;
+        }
+
+        .item-text {
+            flex-grow: 1;
+            font-size: 18px;
+        }
+
+        .delete-btn {
+            background: none;
+            border: none;
+            color: var(--danger-color);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 5px;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+
+        .delete-btn:hover {
+            opacity: 1;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--text-color);
+            color: var(--white);
+            padding: 10px 20px;
+            border-radius: 8px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s, visibility 0.5s;
+        }
+
+        .toast.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>قائمة المشتريات</h1>
+        <div class="input-area">
+            <textarea id="items-textarea" placeholder="مثال: رز، خبز، ٣ كيلو طماطم..."></textarea>
+            <button id="add-btn">إضافة</button>
+        </div>
+        <div class="controls">
+            <button class="control-btn" id="copy-btn">📋 نسخ القائمة</button>
+            <button class="control-btn clear-btn" id="clear-btn">🗑️ مسح الكل</button>
+        </div>
+        <ul id="shopping-list"></ul>
+    </div>
+    
+    <div id="toast" class="toast">تم نسخ القائمة!</div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const itemsTextarea = document.getElementById('items-textarea');
+            const addBtn = document.getElementById('add-btn');
+            const shoppingList = document.getElementById('shopping-list');
+            const clearBtn = document.getElementById('clear-btn');
+            const copyBtn = document.getElementById('copy-btn');
+            const toast = document.getElementById('toast');
+
+            let items = JSON.parse(localStorage.getItem('shoppingListItems')) || [];
+
+            const saveItems = () => {
+                localStorage.setItem('shoppingListItems', JSON.stringify(items));
+            };
+
+            const renderItems = () => {
+                shoppingList.innerHTML = '';
+                if (items.length === 0) {
+                    shoppingList.innerHTML = '<li class="list-item" style="justify-content: center; color: #adb5bd;">قائمتك فارغة حاليًا.</li>';
+                    return;
+                }
+                items.forEach((item, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'list-item';
+                    if (item.purchased) {
+                        li.classList.add('purchased');
+                    }
+                    li.dataset.index = index;
+
+                    const span = document.createElement('span');
+                    span.className = 'item-text';
+                    span.textContent = item.text;
+                    
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-btn';
+                    deleteBtn.innerHTML = '&times;';
+
+                    li.appendChild(span);
+                    li.appendChild(deleteBtn);
+                    shoppingList.appendChild(li);
+                });
+            };
+
+            const addItemsFromTextarea = () => {
+                const text = itemsTextarea.value.trim();
+                if (text === '') return;
+
+                const newItems = text.split(/[,،\n]+/).map(s => s.trim()).filter(s => s !== '');
+                
+                newItems.forEach(itemText => {
+                    if (!items.some(i => i.text === itemText)) {
+                        items.push({ text: itemText, purchased: false });
+                    }
+                });
+
+                itemsTextarea.value = '';
+                saveItems();
+                renderItems();
+            };
+            
+            const showToast = (message) => {
+                toast.textContent = message;
+                toast.classList.add('show');
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 3000);
+            };
+
+            addBtn.addEventListener('click', addItemsFromTextarea);
+            itemsTextarea.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    addItemsFromTextarea();
+                }
+            });
+
+            shoppingList.addEventListener('click', (e) => {
+                const target = e.target;
+                const li = target.closest('.list-item');
+                if (!li || !li.dataset.index) return;
+
+                const index = parseInt(li.dataset.index, 10);
+
+                if (target.classList.contains('delete-btn')) {
+                    items.splice(index, 1);
+                } else {
+                    items[index].purchased = !items[index].purchased;
+                }
+                
+                saveItems();
+                renderItems();
+            });
+
+            clearBtn.addEventListener('click', () => {
+                if (confirm('هل أنت متأكد أنك تريد مسح القائمة بالكامل؟')) {
+                    items = [];
+                    saveItems();
+                    renderItems();
+                }
+            });
+            
+            copyBtn.addEventListener('click', () => {
+                if (items.length === 0) {
+                    showToast('القائمة فارغة للنسخ!');
+                    return;
+                }
+                
+                const listAsText = items.map(item => {
+                    return `${item.purchased ? '[x]' : '[ ]'} ${item.text}`;
+                }).join('\n');
+                
+                navigator.clipboard.writeText(listAsText).then(() => {
+                    showToast('تم نسخ القائمة بنجاح!');
+                }).catch(err => {
+                    showToast('فشل النسخ!');
+                    console.error('Failed to copy: ', err);
+                });
+            });
+
+            renderItems();
+        });
+    </script>
+</body>
+</html>
