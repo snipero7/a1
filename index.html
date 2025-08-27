@@ -44,8 +44,15 @@
 
         .input-area {
             display: flex;
+            flex-wrap: wrap; /* Allows wrapping for smaller screens */
             gap: 10px;
             margin-bottom: 20px;
+        }
+
+        .input-group {
+            flex-grow: 1;
+            display: flex;
+            gap: 10px;
         }
 
         #items-textarea {
@@ -58,8 +65,17 @@
             min-height: 60px;
         }
 
+        #category-select {
+            padding: 12px;
+            border: 1px solid var(--light-gray);
+            border-radius: 8px;
+            font-size: 16px;
+            background-color: var(--white);
+        }
+
         #add-btn {
-            padding: 0 20px;
+            width: 100%; /* Full width on smaller screens */
+            padding: 12px 20px;
             font-size: 16px;
             font-weight: bold;
             background-color: var(--primary-color);
@@ -78,7 +94,7 @@
             display: flex;
             justify-content: space-between;
             gap: 10px;
-            margin-bottom: 20px;
+            margin-bottom: 10px; /* Adjusted margin */
         }
 
         .control-btn {
@@ -107,10 +123,41 @@
             color: var(--white);
         }
 
+        #progress-container {
+            width: 100%;
+            background-color: var(--light-gray);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 5px;
+        }
+
+        #progress-bar-fill {
+            height: 20px;
+            width: 0%;
+            background-color: var(--primary-color);
+            transition: width 0.4s ease-in-out;
+        }
+
+        #progress-label {
+            text-align: center;
+            font-size: 14px;
+            color: var(--text-color);
+            margin-bottom: 20px;
+        }
+
         #shopping-list {
             list-style: none;
             padding: 0;
             margin: 0;
+        }
+
+        .category-header {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--primary-color);
+            padding: 15px 15px 5px 15px;
+            margin-top: 10px;
+            border-bottom: 2px solid var(--primary-color);
         }
 
         .list-item {
@@ -120,7 +167,7 @@
             background: var(--white);
             border-bottom: 1px solid var(--light-gray);
             transition: background-color 0.3s;
-            cursor: pointer;
+            gap: 10px;
         }
 
         .list-item:last-child {
@@ -136,9 +183,36 @@
             background-color: #f1f3f5;
         }
 
-        .item-text {
+        .item-text-container {
             flex-grow: 1;
+            cursor: pointer;
+        }
+
+        .item-text {
             font-size: 18px;
+        }
+
+        .quantity-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .quantity-btn {
+            background-color: var(--light-gray);
+            border: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--text-color);
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .quantity-btn:hover {
+            background-color: #dee2e6;
         }
 
         .delete-btn {
@@ -175,6 +249,15 @@
             visibility: visible;
         }
 
+        @media (min-width: 600px) {
+            .input-group {
+                flex-grow: 1;
+            }
+            #add-btn {
+                width: auto;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -182,13 +265,28 @@
     <div class="container">
         <h1>قائمة المشتريات</h1>
         <div class="input-area">
-            <textarea id="items-textarea" placeholder="مثال: رز، خبز، ٣ كيلو طماطم..."></textarea>
+            <div class="input-group">
+                <textarea id="items-textarea" placeholder="مثال: رز، خبز، ٣ كيلو طماطم..."></textarea>
+                <select id="category-select">
+                    <option value="خضار">خضار</option>
+                    <option value="لحوم">لحوم</option>
+                    <option value="منظفات">منظفات</option>
+                    <option value="خبز">خبز</option>
+                    <option value="أخرى" selected>أخرى</option>
+                </select>
+            </div>
             <button id="add-btn">إضافة</button>
         </div>
         <div class="controls">
             <button class="control-btn" id="copy-btn">📋 نسخ القائمة</button>
             <button class="control-btn clear-btn" id="clear-btn">🗑️ مسح الكل</button>
         </div>
+        
+        <div id="progress-container">
+            <div id="progress-bar-fill"></div>
+        </div>
+        <p id="progress-label"></p>
+
         <ul id="shopping-list"></ul>
     </div>
     
@@ -198,57 +296,143 @@
         document.addEventListener('DOMContentLoaded', () => {
             const itemsTextarea = document.getElementById('items-textarea');
             const addBtn = document.getElementById('add-btn');
+            const categorySelect = document.getElementById('category-select');
             const shoppingList = document.getElementById('shopping-list');
             const clearBtn = document.getElementById('clear-btn');
             const copyBtn = document.getElementById('copy-btn');
             const toast = document.getElementById('toast');
+            const progressContainer = document.getElementById('progress-container');
+            const progressBarFill = document.getElementById('progress-bar-fill');
+            const progressLabel = document.getElementById('progress-label');
 
             let items = JSON.parse(localStorage.getItem('shoppingListItems')) || [];
+            let completionNotified = false;
+
+            const categoryOrder = ["خضار", "لحوم", "منظفات", "خبز", "أخرى"];
+
+            // Data migration for old items
+            items.forEach(item => {
+                if (typeof item.quantity === 'undefined') {
+                    item.quantity = 1;
+                }
+                if (typeof item.category === 'undefined') {
+                    item.category = 'أخرى';
+                }
+            });
 
             const saveItems = () => {
                 localStorage.setItem('shoppingListItems', JSON.stringify(items));
             };
 
+            const updateProgress = () => {
+                const totalItems = items.length;
+                if (totalItems === 0) {
+                    progressContainer.style.display = 'none';
+                    progressLabel.style.display = 'none';
+                    return;
+                }
+
+                progressContainer.style.display = 'block';
+                progressLabel.style.display = 'block';
+
+                const purchasedItems = items.filter(item => item.purchased).length;
+                const percentage = (purchasedItems / totalItems) * 100;
+
+                progressBarFill.style.width = `${percentage}%`;
+                progressLabel.textContent = `${purchasedItems}/${totalItems} مكتملة (${percentage.toFixed(0)}%)`;
+
+                if (percentage === 100 && !completionNotified) {
+                    showToast("أحسنت! انتهيت من القائمة 🎉");
+                    completionNotified = true;
+                } else if (percentage < 100) {
+                    completionNotified = false;
+                }
+            };
+
             const renderItems = () => {
                 shoppingList.innerHTML = '';
                 if (items.length === 0) {
-                    shoppingList.innerHTML = '<li class="list-item" style="justify-content: center; color: #adb5bd;">قائمتك فارغة حاليًا.</li>';
-                    return;
+                    shoppingList.innerHTML = '<li class="list-item" style="justify-content: center; color: #adb5bd; cursor: default;">قائمتك فارغة حاليًا.</li>';
+                } else {
+                    const groupedItems = items.reduce((acc, item, index) => {
+                        const category = item.category || 'أخرى';
+                        if (!acc[category]) {
+                            acc[category] = [];
+                        }
+                        acc[category].push({ ...item, originalIndex: index });
+                        return acc;
+                    }, {});
+
+                    categoryOrder.forEach(category => {
+                        if (groupedItems[category]) {
+                            const header = document.createElement('li');
+                            header.className = 'category-header';
+                            header.textContent = category;
+                            shoppingList.appendChild(header);
+
+                            groupedItems[category].forEach(item => {
+                                const li = document.createElement('li');
+                                li.className = 'list-item';
+                                if (item.purchased) {
+                                    li.classList.add('purchased');
+                                }
+                                li.dataset.index = item.originalIndex;
+
+                                const itemTextContainer = document.createElement('div');
+                                itemTextContainer.className = 'item-text-container';
+
+                                const span = document.createElement('span');
+                                span.className = 'item-text';
+                                span.textContent = `${item.text} (×${item.quantity})`;
+                                
+                                itemTextContainer.appendChild(span);
+
+                                const quantityControls = document.createElement('div');
+                                quantityControls.className = 'quantity-controls';
+
+                                const decreaseBtn = document.createElement('button');
+                                decreaseBtn.className = 'quantity-btn decrease-btn';
+                                decreaseBtn.textContent = '−';
+
+                                const increaseBtn = document.createElement('button');
+                                increaseBtn.className = 'quantity-btn increase-btn';
+                                increaseBtn.textContent = '+';
+
+                                quantityControls.appendChild(decreaseBtn);
+                                quantityControls.appendChild(increaseBtn);
+
+                                const deleteBtn = document.createElement('button');
+                                deleteBtn.className = 'delete-btn';
+                                deleteBtn.innerHTML = '&times;';
+
+                                li.appendChild(itemTextContainer);
+                                li.appendChild(quantityControls);
+                                li.appendChild(deleteBtn);
+                                shoppingList.appendChild(li);
+                            });
+                        }
+                    });
                 }
-                items.forEach((item, index) => {
-                    const li = document.createElement('li');
-                    li.className = 'list-item';
-                    if (item.purchased) {
-                        li.classList.add('purchased');
-                    }
-                    li.dataset.index = index;
-
-                    const span = document.createElement('span');
-                    span.className = 'item-text';
-                    span.textContent = item.text;
-                    
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'delete-btn';
-                    deleteBtn.innerHTML = '&times;';
-
-                    li.appendChild(span);
-                    li.appendChild(deleteBtn);
-                    shoppingList.appendChild(li);
-                });
+                updateProgress();
             };
 
             const addItemsFromTextarea = () => {
                 const text = itemsTextarea.value.trim();
+                const category = categorySelect.value;
                 if (text === '') return;
 
                 const newItems = text.split(/[,،\n]+/).map(s => s.trim()).filter(s => s !== '');
                 
                 newItems.forEach(itemText => {
-                    if (!items.some(i => i.text === itemText)) {
-                        items.push({ text: itemText, purchased: false });
+                    const existingItem = items.find(i => i.text === itemText && i.category === category);
+                    if (existingItem) {
+                        existingItem.quantity++;
+                    } else {
+                        items.push({ text: itemText, purchased: false, quantity: 1, category: category });
                     }
                 });
 
+                completionNotified = false;
                 itemsTextarea.value = '';
                 saveItems();
                 renderItems();
@@ -273,13 +457,20 @@
             shoppingList.addEventListener('click', (e) => {
                 const target = e.target;
                 const li = target.closest('.list-item');
-                if (!li || !li.dataset.index) return;
+                if (!li || typeof li.dataset.index === 'undefined') return;
 
                 const index = parseInt(li.dataset.index, 10);
 
                 if (target.classList.contains('delete-btn')) {
                     items.splice(index, 1);
-                } else {
+                    completionNotified = false;
+                } else if (target.classList.contains('increase-btn')) {
+                    items[index].quantity++;
+                } else if (target.classList.contains('decrease-btn')) {
+                    if (items[index].quantity > 1) {
+                        items[index].quantity--;
+                    }
+                } else if (target.closest('.item-text-container')) {
                     items[index].purchased = !items[index].purchased;
                 }
                 
@@ -290,6 +481,7 @@
             clearBtn.addEventListener('click', () => {
                 if (confirm('هل أنت متأكد أنك تريد مسح القائمة بالكامل؟')) {
                     items = [];
+                    completionNotified = false;
                     saveItems();
                     renderItems();
                 }
@@ -301,11 +493,29 @@
                     return;
                 }
                 
-                const listAsText = items.map(item => {
-                    return `${item.purchased ? '[x]' : '[ ]'} ${item.text}`;
-                }).join('\n');
-                
-                navigator.clipboard.writeText(listAsText).then(() => {
+                const groupedItems = items.reduce((acc, item) => {
+                    const category = item.category || 'أخرى';
+                    if (!acc[category]) {
+                        acc[category] = [];
+                    }
+                    acc[category].push(item);
+                    return acc;
+                }, {});
+
+                let listAsText = "";
+                categoryOrder.forEach(category => {
+                    if (groupedItems[category]) {
+                        listAsText += `
+--- ${category} ---
+`;
+                        groupedItems[category].forEach(item => {
+                            listAsText += `${item.purchased ? '[x]' : '[ ]'} ${item.text} (الكمية: ${item.quantity})
+`;
+                        });
+                    }
+                });
+
+                navigator.clipboard.writeText(listAsText.trim()).then(() => {
                     showToast('تم نسخ القائمة بنجاح!');
                 }).catch(err => {
                     showToast('فشل النسخ!');
@@ -313,6 +523,7 @@
                 });
             });
 
+            saveItems(); // Save once on load to migrate old data
             renderItems();
         });
     </script>
